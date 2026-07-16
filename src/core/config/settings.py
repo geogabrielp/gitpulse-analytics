@@ -46,8 +46,13 @@ class PrefectSettings(BaseSettings):
 
 class DashboardSettings(BaseSettings):
     # dashboard settings
+    # NOTE: reads ONLY from .env (not .env.example) so that on Streamlit
+    # Community Cloud the default data_source="static" is used.
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
-        **COMMON_CONFIG, env_prefix="DASHBOARD_"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_prefix="DASHBOARD_",
     )
 
     data_source: str = "static"  # default to public dashboard
