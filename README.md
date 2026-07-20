@@ -7,7 +7,7 @@
   <p>
     <a href="https://gitpulse-analytics.streamlit.app/"><img src="https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit" alt="Live Demo"></a>
     <a href="https://github.com/geogab-dev/gitpulse-analytics/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/geogab-dev/gitpulse-analytics/ci.yml?branch=main&logo=github&label=CI" alt="CI"></a>
-    <img src="https://img.shields.io/badge/tests-pending-lightgrey" alt="Tests">
+    <a href="https://github.com/geogab-dev/gitpulse-analytics/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/geogab-dev/gitpulse-analytics/ci.yml?branch=main&logo=github&label=Tests" alt="Tests"></a>
   </p>
 </div>
 

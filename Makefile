@@ -2,6 +2,7 @@
 	help up down restart logs ps reset \
 	install \
 	format lint typecheck rmcache \
+	test test-cov \
 	pipeline export-data dashboard
 
 help:
@@ -23,7 +24,11 @@ help:
 	@echo "   make format:    Format code with ruff"
 	@echo "   make lint:      Check code with ruff"
 	@echo "   make typecheck: Check types with ty"
-	@echo "   make rmcache:   Remove __pycache__ and .ruff_cache directories"
+	@echo "   make rmcache:   Remove __pycache__, .ruff_cache, .pytest_cache, and coverage artifacts"
+	@echo ""
+	@echo "[TESTING]"
+	@echo "   make test:      Run all tests (fast-fail on first error)"
+	@echo "   make test-cov:  Run all tests with coverage report"
 	@echo ""
 	@echo "[PIPELINE]"
 	@echo "   make pipeline:    Run the full ETL pipeline (bronze + silver + gold)"
@@ -73,8 +78,17 @@ export-data:
 dashboard:
 	uv run streamlit run dashboard/app.py
 
+test:
+	uv run pytest tests/ -x --verbose
+
+test-cov:
+	uv run pytest tests/ --cov=src --cov-report=term-missing
+
 rmcache:
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type f -name ".coverage" -delete 2>/dev/null || true
+	@find . -type f -name ".coverage.*" -delete 2>/dev/null || true
 	@echo "Cache cleaned!"
