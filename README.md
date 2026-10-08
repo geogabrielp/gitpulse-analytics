@@ -6,8 +6,8 @@
 
   <p>
     <a href="https://gitpulse-analytics.streamlit.app/"><img src="https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit" alt="Live Demo"></a>
-    <a href="https://github.com/geogab-dev/gitpulse-analytics/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/geogab-dev/gitpulse-analytics/ci.yml?branch=main&logo=github&label=CI" alt="CI"></a>
-    <a href="https://github.com/geogab-dev/gitpulse-analytics/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/geogab-dev/gitpulse-analytics/ci.yml?branch=main&logo=github&label=Tests" alt="Tests"></a>
+    <a href="https://github.com/geogabrielp/gitpulse-analytics/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/geogabrielp/gitpulse-analytics/ci.yml?branch=main&logo=github&label=CI" alt="CI"></a>
+    <a href="https://github.com/geogabrielp/gitpulse-analytics/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/geogabrielp/gitpulse-analytics/ci.yml?branch=main&logo=github&label=Tests" alt="Tests"></a>
   </p>
 </div>
 
@@ -88,7 +88,7 @@ A daily score (0–100) that captures repository vitality from four weighted Git
 ### 1. Clone & install
 
 ```bash
-git clone https://github.com/geogab-dev/gitpulse-analytics.git
+git clone https://github.com/geogabrielp/gitpulse-analytics.git
 cd gitpulse-analytics
 make install         # uv sync creates .venv with all dependencies
 ```
@@ -198,7 +198,7 @@ gitpulse-analytics/
 
 ## 🤝 Contributing
 
-Contributions are welcome! Feel free to open an [issue](https://github.com/geogab-dev/gitpulse-analytics/issues) or submit a PR.
+Contributions are welcome! Feel free to open an [issue](https://github.com/geogabrielp/gitpulse-analytics/issues) or submit a PR.
 
 ---
 
