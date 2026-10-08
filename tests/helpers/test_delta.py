@@ -9,6 +9,7 @@ for unit testing the core logic of append_delta and filter_scd1.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -17,7 +18,7 @@ from deltalake import DeltaTable, write_deltalake
 from polars.dataframe.frame import DataFrame
 from polars.lazyframe.frame import LazyFrame
 
-from core.helpers.delta import append_delta, filter_scd1
+from core.helpers.delta import append_delta, filter_scd1, replace_days_delta
 
 
 class TestAppendDelta:
@@ -165,3 +166,118 @@ class TestFilterSCD1:
         ).collect()
 
         assert len(result) == 1  # (1, alice_updated) is a change
+
+
+def _daily_df(days: list[date], value: int) -> DataFrame:
+    """Build a Gold-like DataFrame: one row per day, partition columns included."""
+    return pl.DataFrame(
+        data={
+            "day": days,
+            "year": [str(day.year) for day in days],
+            "month": [f"{day.month:02d}" for day in days],
+            "total_events": [value] * len(days),
+        }
+    )
+
+
+class TestReplaceDaysDelta:
+    """Test the day-level replace helper using local Delta tables."""
+
+    @pytest.mark.helper
+    def test_creates_table_when_missing(self, tmp_path: Path) -> None:
+        """replace_days_delta must create the table, partitioned, on first write."""
+        target = str(tmp_path / "gold")
+
+        replace_days_delta(
+            df=_daily_df([date(2026, 10, 7)], 5), target=target, partition_by=["year", "month"]
+        )
+
+        result: DataFrame = pl.read_delta(source=target)
+        assert result.height == 1
+        assert DeltaTable(table_uri=target).metadata().partition_columns == ["year", "month"]
+
+    @pytest.mark.helper
+    def test_replaces_only_the_given_days(self, tmp_path: Path) -> None:
+        """Days absent from the DataFrame must survive untouched."""
+        target = str(tmp_path / "gold")
+        days = [date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7)]
+        append_delta(df=_daily_df(days, 1), target=target, partition_by=["year", "month"])
+
+        replace_days_delta(
+            df=_daily_df([date(2026, 10, 7)], 99), target=target, partition_by=["year", "month"]
+        )
+
+        result: DataFrame = pl.read_delta(source=target).sort("day")
+        assert result["total_events"].to_list() == [1, 1, 99]
+        assert len(result) == 3  # noqa: PLR2004
+
+    @pytest.mark.helper
+    def test_is_idempotent(self, tmp_path: Path) -> None:
+        """Replacing the same days with the same rows must not grow the table."""
+        target = str(tmp_path / "gold")
+        df = _daily_df([date(2026, 10, 7)], 99)
+
+        replace_days_delta(df=df, target=target, partition_by=["year", "month"])
+        replace_days_delta(df=df, target=target, partition_by=["year", "month"])
+
+        result: DataFrame = pl.read_delta(source=target)
+        assert result.height == 1
+        assert result["total_events"].to_list() == [99]
+
+    @pytest.mark.helper
+    def test_drops_previous_duplicates_of_the_replaced_day(self, tmp_path: Path) -> None:
+        """A day already duplicated in the table must come back as a single copy."""
+        target = str(tmp_path / "gold")
+        day = date(2026, 10, 7)
+        for _ in range(2):
+            append_delta(df=_daily_df([day], 1), target=target, partition_by=["year", "month"])
+        assert pl.read_delta(source=target).height == 2  # noqa: PLR2004
+
+        replace_days_delta(df=_daily_df([day], 50), target=target, partition_by=["year", "month"])
+
+        result: DataFrame = pl.read_delta(source=target)
+        assert result.height == 1
+        assert result["total_events"].to_list() == [50]
+
+    @pytest.mark.helper
+    def test_keeps_days_between_replaced_days(self, tmp_path: Path) -> None:
+        """Replacing 2 non-adjacent days must not delete the day in between.
+
+        This is the reason the predicate is an IN list rather than a BETWEEN
+        range: a range would silently drop 2026-10-07.
+        """
+        target = str(tmp_path / "gold")
+        days = [date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)]
+        append_delta(df=_daily_df(days, 1), target=target, partition_by=["year", "month"])
+
+        replace_days_delta(
+            df=_daily_df([date(2026, 10, 6), date(2026, 10, 8)], 7),
+            target=target,
+            partition_by=["year", "month"],
+        )
+
+        result: DataFrame = pl.read_delta(source=target).sort("day")
+        assert result["day"].to_list() == days
+        assert result["total_events"].to_list() == [7, 1, 7]
+
+    @pytest.mark.helper
+    def test_empty_dataframe_writes_nothing(self, tmp_path: Path) -> None:
+        """An empty DataFrame must be a no-op, not a malformed predicate."""
+        target = str(tmp_path / "gold")
+        append_delta(
+            df=_daily_df([date(2026, 10, 7)], 1), target=target, partition_by=["year", "month"]
+        )
+
+        empty = pl.DataFrame(
+            schema={
+                "day": pl.Date,
+                "year": pl.String,
+                "month": pl.String,
+                "total_events": pl.Int64,
+            }
+        )
+        replace_days_delta(df=empty, target=target, partition_by=["year", "month"])
+
+        result: DataFrame = pl.read_delta(source=target)
+        assert result.height == 1
+        assert result["total_events"].to_list() == [1]

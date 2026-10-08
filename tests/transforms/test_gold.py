@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from pathlib import Path
 
 import polars as pl
 import pytest
+from deltalake import write_deltalake
 from polars.dataframe.frame import DataFrame
 from polars.lazyframe.frame import LazyFrame
 
-from core.transforms.silver_to_gold import _build_gold_daily
+from core.transforms import silver_to_gold
+from core.transforms.silver_to_gold import (
+    _build_gold_daily,
+    _partition_days_range,
+    _pending_days,
+)
 
 
 # Helper: build a Silver-like LazyFrame for testing
@@ -248,3 +255,276 @@ class TestAggregation:
         df: LazyFrame = _build_silver_lf(types=[], actions=[])
         result: DataFrame = _build_gold_daily(lf=df)
         assert result.is_empty()
+
+
+# Helper: build a Silver-like LazyFrame including its (year, month, day) columns
+def _build_silver_days_lf(datetimes: list[datetime]) -> pl.LazyFrame:
+    """Create a minimal Silver events LazyFrame with the partition columns."""
+    naive: list[datetime] = [moment.replace(tzinfo=None) for moment in datetimes]
+
+    return (
+        pl.DataFrame(data={"created_at": pl.Series(values=naive, dtype=pl.Datetime)})
+        .with_columns(
+            year=pl.col("created_at").dt.year().cast(pl.String),
+            month=pl.col("created_at").dt.month().cast(pl.String).str.pad_start(2, "0"),
+            day=pl.col("created_at").dt.day().cast(pl.String).str.pad_start(2, "0"),
+        )
+        .lazy()
+    )
+
+
+WATERMARK: date = date(2026, 10, 7)
+
+
+class TestPendingDays:
+    """Test the pending-day selection (silver_to_gold._pending_days)."""
+
+    @pytest.mark.transform
+    def test_includes_the_watermark_day(self) -> None:
+        """The watermark day is reprocessed on purpose: it is still partial.
+
+        It is the current UTC day, and Silver only ever appends hours to it, so
+        skipping it here would freeze the day at whatever was aggregated first.
+        """
+        lf: LazyFrame = _build_silver_days_lf(
+            [
+                datetime(2026, 10, 7, 0, 0, 0),  # midnight — the subtle case
+                datetime(2026, 10, 7, 23, 59, 59),
+                datetime(2026, 10, 8, 1, 0, 0),
+            ]
+        )
+        assert _pending_days(lf=lf, watermark=WATERMARK) == [date(2026, 10, 7), date(2026, 10, 8)]
+
+    @pytest.mark.transform
+    def test_excludes_days_before_the_watermark(self) -> None:
+        """Days older than the watermark are already aggregated and must not return."""
+        lf: LazyFrame = _build_silver_days_lf(
+            [datetime(2026, 10, 6, 23, 59, 59), datetime(2026, 10, 7, 0, 0, 0)]
+        )
+        assert _pending_days(lf=lf, watermark=WATERMARK) == [date(2026, 10, 7)]
+
+    @pytest.mark.transform
+    def test_caught_up_returns_the_watermark_day(self) -> None:
+        """A table in sync with Silver still has one day to rewrite, not zero."""
+        lf: LazyFrame = _build_silver_days_lf([datetime(2026, 10, 7, 3, 0, 0)])
+        assert _pending_days(lf=lf, watermark=WATERMARK) == [date(2026, 10, 7)]
+
+    @pytest.mark.transform
+    def test_empty_silver_returns_empty(self) -> None:
+        """No Silver events at all means nothing to aggregate."""
+        assert _pending_days(lf=_build_silver_days_lf([]), watermark=WATERMARK) == []
+
+    @pytest.mark.transform
+    def test_excludes_earlier_month_in_same_year(self) -> None:
+        """The month part of the partition predicate must not leak earlier months."""
+        lf: LazyFrame = _build_silver_days_lf(
+            [datetime(2026, 9, 29, 12, 0, 0), datetime(2026, 10, 7, 12, 0, 0)]
+        )
+        assert _pending_days(lf=lf, watermark=WATERMARK) == [date(2026, 10, 7)]
+
+    @pytest.mark.transform
+    def test_excludes_earlier_year(self) -> None:
+        """Same month and day in an earlier year must stay out."""
+        lf: LazyFrame = _build_silver_days_lf(
+            [datetime(2025, 10, 7, 12, 0, 0), datetime(2026, 10, 7, 12, 0, 0)]
+        )
+        assert _pending_days(lf=lf, watermark=WATERMARK) == [date(2026, 10, 7)]
+
+    @pytest.mark.transform
+    def test_month_boundary(self) -> None:
+        """Watermark on the last day of a month must carry into the next one."""
+        lf: LazyFrame = _build_silver_days_lf(
+            [datetime(2026, 9, 30, 12, 0, 0), datetime(2026, 10, 1, 0, 0, 0)]
+        )
+        assert _pending_days(lf=lf, watermark=date(2026, 9, 30)) == [
+            date(2026, 9, 30),
+            date(2026, 10, 1),
+        ]
+
+    @pytest.mark.transform
+    def test_year_boundary(self) -> None:
+        """Watermark on the last day of a year must carry into the next one."""
+        lf: LazyFrame = _build_silver_days_lf(
+            [datetime(2025, 12, 31, 12, 0, 0), datetime(2026, 1, 1, 0, 0, 0)]
+        )
+        assert _pending_days(lf=lf, watermark=date(2025, 12, 31)) == [
+            date(2025, 12, 31),
+            date(2026, 1, 1),
+        ]
+
+
+class TestGetWatermark:
+    """Test the gold watermark, including the empty-table edge case."""
+
+    @pytest.mark.transform
+    def test_missing_table_returns_backfill_sentinel(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A gold table that doesn't exist yet means a full backfill."""
+        monkeypatch.setattr(silver_to_gold, "GOLD_DAILY_ACTIVITY", str(tmp_path / "gold"))
+        assert silver_to_gold._get_watermark() == date(2014, 12, 31)
+
+    @pytest.mark.transform
+    def test_empty_table_returns_backfill_sentinel(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An existing but empty gold table must not yield a None watermark."""
+        target = tmp_path / "gold"
+        write_deltalake(
+            table_or_uri=str(target),
+            data=pl.DataFrame(schema={"day": pl.Date}).to_arrow(),
+        )
+        monkeypatch.setattr(silver_to_gold, "GOLD_DAILY_ACTIVITY", str(target))
+        assert silver_to_gold._get_watermark() == date(2014, 12, 31)
+
+    @pytest.mark.transform
+    def test_returns_greatest_day(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The watermark is the greatest day already written."""
+        target = tmp_path / "gold"
+        write_deltalake(
+            table_or_uri=str(target),
+            data=pl.DataFrame({"day": [date(2026, 10, 5), date(2026, 10, 7)]}).to_arrow(),
+        )
+        monkeypatch.setattr(silver_to_gold, "GOLD_DAILY_ACTIVITY", str(target))
+        assert silver_to_gold._get_watermark() == date(2026, 10, 7)
+
+
+# a spread that crosses a month and a year, with days on both sides of a batch
+SPREAD: list[datetime] = [
+    datetime(2025, 12, 31, 12, 0, 0),
+    datetime(2026, 1, 1, 0, 0, 0),
+    datetime(2026, 9, 29, 12, 0, 0),
+    datetime(2026, 9, 30, 12, 0, 0),
+    datetime(2026, 10, 1, 12, 0, 0),
+    datetime(2026, 10, 6, 12, 0, 0),
+    datetime(2026, 10, 7, 12, 0, 0),
+    datetime(2026, 10, 8, 12, 0, 0),
+    datetime(2027, 1, 1, 12, 0, 0),
+]
+
+
+class TestPartitionDayRange:
+    """Test the day-range partition predicate used to prune the silver read."""
+
+    @pytest.mark.transform
+    def test_single_day_range_keeps_only_that_day(self) -> None:
+        """A one-day batch must select exactly one day out of the whole spread."""
+        kept = (
+            _build_silver_days_lf(SPREAD)
+            .filter(_partition_days_range(date(2026, 10, 7), date(2026, 10, 7)))
+            .select("day")
+            .collect()
+        )
+        assert kept["day"].to_list() == ["07"]
+
+    @pytest.mark.transform
+    def test_range_across_a_month_boundary(self) -> None:
+        """Both ends must be inclusive when the range spans two months."""
+        kept = (
+            _build_silver_days_lf(SPREAD)
+            .filter(_partition_days_range(date(2026, 9, 30), date(2026, 10, 1)))
+            .select("month", "day")
+            .collect()
+        )
+        assert sorted(kept["month"].to_list()) == ["09", "10"]
+        assert sorted(kept["day"].to_list()) == ["01", "30"]
+
+    @pytest.mark.transform
+    def test_range_across_a_year_boundary(self) -> None:
+        """Both ends must be inclusive when the range spans two years."""
+        kept = (
+            _build_silver_days_lf(SPREAD)
+            .filter(_partition_days_range(date(2025, 12, 31), date(2026, 1, 1)))
+            .select("day", "month", "year")
+            .collect()
+        )
+        assert sorted(kept["day"].to_list()) == ["01", "31"]
+
+    @pytest.mark.transform
+    def test_multi_day_range_keeps_every_day_within(self) -> None:
+        """A 3-day batch must not clip its middle or its ends."""
+        kept = (
+            _build_silver_days_lf(SPREAD)
+            .filter(_partition_days_range(date(2026, 10, 6), date(2026, 10, 8)))
+            .select("day")
+            .collect()
+        )
+        assert sorted(kept["day"].to_list()) == ["06", "07", "08"]
+
+
+def _silver_frame(datetimes: list[datetime]) -> pl.DataFrame:
+    """Build a Silver-like frame with its 4 partition columns (naive, as in Silver)."""
+    naive: list[datetime] = [moment.replace(tzinfo=None) for moment in datetimes]
+
+    return pl.DataFrame(
+        data={
+            "type": ["PushEvent"] * len(naive),
+            "action": ["pushed"] * len(naive),
+            "actor_id": list(range(100, 100 + len(naive))),
+            "repo_id": [10] * len(naive),
+            "org_id": [1] * len(naive),
+            "created_at": pl.Series(values=naive, dtype=pl.Datetime),
+        }
+    ).with_columns(
+        year=pl.col("created_at").dt.year().cast(pl.String),
+        month=pl.col("created_at").dt.month().cast(pl.String).str.pad_start(2, "0"),
+        day=pl.col("created_at").dt.day().cast(pl.String).str.pad_start(2, "0"),
+        hour=pl.col("created_at").dt.hour().cast(pl.String).str.pad_start(2, "0"),
+    )
+
+
+class TestReadSilverEvents:
+    """Test the silver read against a local Delta table (delta-rs ignores moto)."""
+
+    @pytest.mark.transform
+    def test_keeps_only_the_batch_day_and_projects_six_columns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A 1-day batch must return that day's rows, projected to what gold needs."""
+        target = tmp_path / "events"
+        write_deltalake(
+            table_or_uri=str(target),
+            data=_silver_frame(
+                [
+                    datetime(2026, 10, 6, 23, 0, 0),
+                    datetime(2026, 10, 7, 0, 0, 0),
+                    datetime(2026, 10, 7, 12, 0, 0),
+                    datetime(2026, 10, 8, 1, 0, 0),
+                ]
+            ).to_arrow(),
+            partition_by=["year", "month", "day", "hour"],
+        )
+        monkeypatch.setattr(silver_to_gold, "SILVER_GH_EVENTS", str(target))
+
+        result: DataFrame = silver_to_gold._read_silver_events([date(2026, 10, 7)]).collect()
+
+        assert result.columns == ["type", "action", "actor_id", "repo_id", "org_id", "created_at"]
+        # row order across partitions isn't guaranteed; the gold agg sorts later
+        assert sorted(result["actor_id"].to_list()) == [101, 102]
+
+    @pytest.mark.transform
+    def test_multi_day_batch_keeps_both_ends(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both ends of a multi-day batch must survive the partition predicate."""
+        target = tmp_path / "events"
+        write_deltalake(
+            table_or_uri=str(target),
+            data=_silver_frame(
+                [
+                    datetime(2026, 10, 5, 23, 0, 0),
+                    datetime(2026, 10, 6, 12, 0, 0),
+                    datetime(2026, 10, 7, 0, 0, 0),
+                    datetime(2026, 10, 7, 23, 0, 0),
+                    datetime(2026, 10, 8, 1, 0, 0),
+                ]
+            ).to_arrow(),
+            partition_by=["year", "month", "day", "hour"],
+        )
+        monkeypatch.setattr(silver_to_gold, "SILVER_GH_EVENTS", str(target))
+
+        result: DataFrame = silver_to_gold._read_silver_events(
+            [date(2026, 10, 6), date(2026, 10, 7)]
+        ).collect()
+
+        assert sorted(result["actor_id"].to_list()) == [101, 102, 103]

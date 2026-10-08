@@ -29,7 +29,7 @@ def gold_transform_flow(batch_size_days: int = 7) -> None:
     Aggregate pending Silver events into the single ``gold_daily`` table.
 
     Single scan → single aggregate (event types, PR actions, issue actions,
-    GitPulse Score) → Pandera validate → single append per batch.
+    GitPulse Score) → Pandera validate → idempotent day-replacing write.
 
     Args:
         batch_size_days: Number of days per batch (default 7).
