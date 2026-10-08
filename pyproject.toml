@@ -7,6 +7,7 @@ name = "gitpulse-analytics"
 version = "0.1.0"
 description = "Data engineering pipeline for GitHub analytics using open-source tools."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "colorlog>=6.10.1",
