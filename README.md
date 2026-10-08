@@ -1,14 +1,16 @@
+<!-- markdownlint-disable MD033 -->
+<!-- markdownlint-disable MD041 -->
 <div align="center">
-  <h1>📊 GitPulse Analytics</h1>
-  <p>
-    <em>End-to-end data pipeline for GitHub analytics, from raw events to interactive dashboard.</em>
-  </p>
 
-  <p>
-    <a href="https://gitpulse-analytics.streamlit.app/"><img src="https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit" alt="Live Demo"></a>
-    <a href="https://github.com/geogabrielp/gitpulse-analytics/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/geogabrielp/gitpulse-analytics/ci.yml?branch=main&logo=github&label=CI" alt="CI"></a>
-    <a href="https://github.com/geogabrielp/gitpulse-analytics/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/geogabrielp/gitpulse-analytics/ci.yml?branch=main&logo=github&label=Tests" alt="Tests"></a>
-  </p>
+  <!-- Badges status -->
+  [![CI](https://shieldcn.dev/github/geogabrielp/gitpulse-analytics/ci.svg?size=xs&theme=zinc&split=true&statusDot=true)](https://github.com/geogabrielp/gitpulse-analytics/actions)
+  [![Live Demo](https://shieldcn.dev/badge/Live%20Demo.svg?variant=secondary&size=xs&theme=zinc&split=true&logo=streamlit&logoColor=ef4444&statusDot=true)](https://gitpulse-analytics.streamlit.app/)
+  [![License: MIT](https://shieldcn.dev/github/geogabrielp/gitpulse-analytics/license.svg?size=xs&split=true)](https://github.com/geogabrielp/gitpulse-analytics/blob/main/LICENSE)
+
+  <!-- Wide banner -->
+  ![Gitpulse Analytics](https://shieldcn.dev/header/graph.svg?title=Gitpulse+Analytics&subtitle=End-to-end+data+pipeline+with+GitHub+data.&logo=github&size=wide&mode=dark)
+
+  <sub>⏳ Live demo on Streamlit Community Cloud: the first load wakes the app, so give it ~30 seconds.</sub>
 </div>
 
 ---
@@ -100,7 +102,11 @@ make up              # MinIO, PostgreSQL, Prefect server
 make pipeline        # Full pipeline: bronze → silver → gold (last 7 days)
 ```
 
-> ⚡ The full pipeline processes 7 days of data (~30M events) in **~5 minutes** using 10 thread-pool workers and 12 GB RAM.
+> ⚡ **Benchmark**: measured from a clean state (`make reset` → `make up` → `uv run main.py --days 15`) on a **MacBook Pro M1 Pro (8-core, 16 GB RAM)**.
+> **15 days** of GH Archive (362 hourly files, **28.1M events**, 5.0 GB of raw Parquet) ingested and transformed
+> end-to-end in **10m 14s** (bronze 7m 09s · silver 2m 39s · gold 16s) peaking at **3.8 GB RAM**, with 8 ingestion
+> workers (`cpu_count()` on this machine). Bronze is download-bound, so its share tracks network throughput, silver
+> and gold scale linearly with data volume.
 
 ### 3. Launch dashboard
 
@@ -129,7 +135,7 @@ make dashboard       # http://localhost:8501
 |----------|-----------|---------|
 | **Storage** | [MinIO](https://min.io/) + [Delta Lake](https://delta.io/) | S3-compatible storage, ACID transactions, time travel, schema enforcement |
 | **Format** | [Apache Parquet](https://parquet.apache.org/) (zstd) | Columnar storage with high compression |
-| **ETL** | [Polars](https://pola.rs/) | Lazy DataFrame API, streaming, zero pandas |
+| **ETL** | [Polars](https://pola.rs/) | Lazy DataFrame API, streaming, no pandas in the ETL |
 | **Validation** | [Pandera](https://pandera.readthedocs.io/) | Runtime data contracts, fast-fail on quality issues |
 | **Orchestration** | [Prefect v3](https://docs.prefect.io/v3/) | Retries, monitoring, idempotent flows |
 | **Visualization** | [Streamlit](https://streamlit.io/) + [ECharts](https://echarts.apache.org/) | Interactive dashboard with rich chart types |
@@ -199,6 +205,12 @@ gitpulse-analytics/
 ## 🤝 Contributing
 
 Contributions are welcome! Feel free to open an [issue](https://github.com/geogabrielp/gitpulse-analytics/issues) or submit a PR.
+
+---
+
+## ⚖️ License
+
+[MIT](LICENSE) © 2026 George Gabriel - fork it, modify it, or just use it as a reference for your own projects.
 
 ---
 
