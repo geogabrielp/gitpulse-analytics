@@ -1,5 +1,5 @@
 """
-Delta Lake helpers: append-only writes for facts and SCD Type 1 dimensions.
+Delta Lake helpers: append-only facts, day-level replaces, SCD Type 1 dimensions.
 """
 
 from __future__ import annotations
@@ -37,6 +37,47 @@ def append_delta(
     logger.info("appended %s rows into %s", magenta(len(df)), cyan(target))
 
 
+def replace_days_delta(
+    df: DataFrame,
+    target: str,
+    days_col: str = "day",
+    partition_by: list[str] | None = None,
+) -> None:
+    """
+    Atomically replace the `days_col` days present in *df*.
+
+    One commit (mode="overwrite" + predicate), so there is no window where
+    the days are missing.
+
+    Built for the Gold aggregate, whose newest day is still growing.
+    """
+    logger = get_logger(__name__)
+
+    days: list[str] = sorted({day.isoformat() for day in df[days_col].to_list()})
+
+    if not days:
+        logger.info("no days to replace in %s, skipping write", cyan(target))
+        return
+
+    predicate: str = f"{days_col} IN ({', '.join(f'DATE {day!r}' for day in days)})"
+
+    write_deltalake(
+        target,
+        df.to_arrow(),
+        storage_options=S3_STORAGE_OPTIONS,
+        mode="overwrite",
+        predicate=predicate,
+        partition_by=partition_by or [],
+    )
+
+    logger.info(
+        "replaced %s day(s) in %s (%s rows)",
+        magenta(len(days)),
+        cyan(target),
+        magenta(len(df)),
+    )
+
+
 def filter_scd1(
     lf: LazyFrame,
     target: str,
@@ -67,4 +108,4 @@ def filter_scd1(
     return lf.join(existing, on=[id_col, track_col], how="anti")
 
 
-__all__: list[str] = ["append_delta", "filter_scd1"]
+__all__: list[str] = ["append_delta", "filter_scd1", "replace_days_delta"]

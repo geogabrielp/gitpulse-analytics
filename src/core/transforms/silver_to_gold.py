@@ -4,6 +4,9 @@ Build the single Gold aggregated table from Silver events.
 A single group_by + agg pass computes all daily metrics:
 event-type counts, GitPulse Score, PR action breakdown,
 and issue action breakdown, no payload parsing.
+
+Unlike append-only Bronze and Silver, Gold is rewritten day by day: its
+newest day is the current, still incomplete UTC day.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from polars import DataFrame, LazyFrame
 
 from core.config import settings
 from core.contracts.gold import GoldDailyContract
-from core.helpers.delta import append_delta
+from core.helpers.delta import replace_days_delta
 from core.helpers.logger import get_logger, magenta, yellow
 from core.helpers.s3 import S3_STORAGE_OPTIONS
 
@@ -56,37 +59,86 @@ def _get_watermark() -> date:
         )
         return date(2014, 12, 31)
 
-    watermark: date = (
+    watermark: date | None = (
         pl.scan_delta(source=GOLD_DAILY_ACTIVITY, storage_options=S3_STORAGE_OPTIONS)
         .select(pl.col("day").max())
         .collect()
         .item()
     )
 
+    if watermark is None:
+        # table exists but holds no rows: same situation as a full backfill
+        logger.info(
+            "%s is empty: watermark set to 2014-12-31 (full backfill)",
+            yellow(GOLD_DAILY_ACTIVITY),
+        )
+        return date(2014, 12, 31)
+
     logger.info("watermark: %s", magenta(str(watermark)))
     return watermark
 
 
-def resolve_pending_days() -> list[date]:
+# partition pruning helpers
+def _partition_days_from(bound: date) -> pl.Expr:
+    """Predicate on the (year, month, day) partition strings selecting days >= bound."""
+    year: str = str(bound.year)
+    month: str = f"{bound.month:02d}"
+    day: str = f"{bound.day:02d}"
+
+    return (pl.col("year") > year) | (
+        (pl.col("year") == year)
+        & ((pl.col("month") > month) | ((pl.col("month") == month) & (pl.col("day") >= day)))
+    )
+
+
+def _partition_days_until(bound: date) -> pl.Expr:
+    """Predicate on the (year, month, day) partition strings selecting days <= bound."""
+    year: str = str(bound.year)
+    month: str = f"{bound.month:02d}"
+    day: str = f"{bound.day:02d}"
+
+    return (pl.col("year") < year) | (
+        (pl.col("year") == year)
+        & ((pl.col("month") < month) | ((pl.col("month") == month) & (pl.col("day") <= day)))
+    )
+
+
+def _partition_days_range(start_date: date, end_date: date) -> pl.Expr:
+    """Predicate on the partition strings selecting days in [start_date, end_date]."""
+    return _partition_days_from(bound=start_date) & _partition_days_until(bound=end_date)
+
+
+def _pending_days(lf: LazyFrame, watermark: date) -> list[date]:
     """
-    Return Silver event days not yet in the gold table, oldest-first.
+    Return the Silver event days on or after watermark, oldest-first.
 
-    Uses ``WHERE created_at > watermark`` — Delta Lake partition pruning
-    handles performance.
+    watermark is included on purpose: it is the current UTC day, still
+    incomplete in Silver, and only a recompute finishes it.
     """
-    logger = get_logger(__name__)
-
-    watermark: date = _get_watermark()
-
-    pending: list[date] = (
-        pl.scan_delta(source=SILVER_GH_EVENTS, storage_options=S3_STORAGE_OPTIONS)
-        .filter(pl.col("created_at") > watermark)
+    return (
+        lf.filter(_partition_days_from(bound=watermark))
         .select(pl.col("created_at").dt.date().alias("day"))
         .unique()
         .sort("day")
         .collect()
         .to_series()
         .to_list()
+    )
+
+
+def resolve_pending_days() -> list[date]:
+    """
+    Return Silver event days to (re)aggregate, oldest-first, watermark included.
+
+    On a caught-up table this is roughly one day, not zero.
+    """
+    logger = get_logger(__name__)
+
+    watermark: date = _get_watermark()
+
+    pending: list[date] = _pending_days(
+        lf=pl.scan_delta(source=SILVER_GH_EVENTS, storage_options=S3_STORAGE_OPTIONS),
+        watermark=watermark,
     )
 
     n_pending: int = len(pending)
@@ -101,7 +153,7 @@ def resolve_pending_days() -> list[date]:
         )
     else:
         logger.info(
-            "pending days: %s (all caught up, watermark=%s)",
+            "pending days: %s (silver has no events at/after watermark=%s)",
             yellow("0"),
             magenta(str(watermark)),
         )
@@ -112,10 +164,10 @@ def resolve_pending_days() -> list[date]:
 # helper: filter + project silver events for a day range
 def _read_silver_events(days_batch: list[date]) -> LazyFrame:
     """
-    Scan silver events for a specific range of days.
+    Scan silver events for a range of days, projected to the gold columns.
 
-    Projects to the 8 columns needed by the gold aggregation — no payload
-    parsing needed since we don't pair PRs/issues by number.
+    The partition predicate is a pruning hint only; created_at stays the
+    authoritative filter for which rows are read.
     """
     start_date: date = days_batch[0]
     end_date: date = days_batch[-1]
@@ -123,13 +175,15 @@ def _read_silver_events(days_batch: list[date]) -> LazyFrame:
     return (
         pl.scan_delta(source=SILVER_GH_EVENTS, storage_options=S3_STORAGE_OPTIONS)
         .filter(
+            # purely a pruning hint: created_at stays the authoritative filter
+            _partition_days_range(start_date=start_date, end_date=end_date),
             pl.col("created_at").dt.date().is_between(start_date, end_date, closed="both"),
         )
         .select("type", "action", "actor_id", "repo_id", "org_id", "created_at")
     )
 
 
-# single transform: 1 scan → 1 agg → 1 append
+# single transform: 1 scan → 1 agg → 1 write
 def _build_gold_daily(lf: LazyFrame) -> DataFrame:
     """
     Aggregate all daily metrics in a single pass: event counts, GitPulse
@@ -209,7 +263,7 @@ def silver_to_gold(days_batch: list[date]) -> TransformResult:
     """
     Process one batch of days through the Silver -> Gold pipeline.
 
-    Single scan → single aggregate → Pandera validate → single append.
+    Single scan → single aggregate → Pandera validate → idempotent day replace.
     """
     logger = get_logger(__name__)
     batch_label: str = f"{days_batch[0]} → {days_batch[-1]}"
@@ -225,7 +279,7 @@ def silver_to_gold(days_batch: list[date]) -> TransformResult:
 
         GoldDailyContract.validate(check_obj=df)
 
-        append_delta(
+        replace_days_delta(
             df=df,
             target=GOLD_DAILY_ACTIVITY,
             partition_by=["year", "month"],
