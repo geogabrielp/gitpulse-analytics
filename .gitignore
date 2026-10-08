@@ -17,3 +17,20 @@ notebooks/
 
 # Vscode local settings
 .vscode
+
+# Test artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# macOS caches
+.DS_Store
+.AppleDouble
+.LSOverride
+**/.DS_Store
