@@ -1,7 +1,8 @@
 """
 Sidebar: global date range filter for all dashboard pages.
 
-Renders a date input picker and apply button shared across every page.
+Renders a date input picker, the data freshness banner, and an apply button
+shared across every page.
 """
 
 from __future__ import annotations
@@ -45,6 +46,8 @@ def render() -> None:
         key="filter_date_range_picker",
     )
 
+    st.sidebar.caption(body=f"Data up to **{max_day.isoformat()}** (freshness).")
+
     # Apply button: only on click does the confirmed filter update + rerun
     if st.sidebar.button(
         label="Apply",
@@ -66,12 +69,12 @@ def render() -> None:
     )
     st.sidebar.link_button(
         label=":material/open_in_new: View project on GitHub",
-        url="https://github.com/geogab-dev/gitpulse-analytics",
+        url="https://github.com/geogabrielp/gitpulse-analytics",
         type="secondary",
         use_container_width=True,
     )
     st.sidebar.button(
-        label="Made with ❤️ by @geogab-dev",
+        label="Made with ❤️ by @geogabrielp",
         type="tertiary",
         use_container_width=True,
     )

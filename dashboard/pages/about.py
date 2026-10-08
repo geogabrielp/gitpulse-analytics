@@ -36,7 +36,7 @@ st.markdown(
     body="""
     For a complete walkthrough: including a quick-start guide,
     project structure, and troubleshooting, check out the project's
-    [**README**](https://github.com/geogab-dev/gitpulse-analytics#readme).
+    [**README**](https://github.com/geogabrielp/gitpulse-analytics#readme).
     """
 )
 
