@@ -1,20 +1,29 @@
-"""Export static Parquet files for the public Streamlit dashboard."""
+"""
+Export static Parquet files for the public Streamlit dashboard.
+
+Usage:
+    uv run python scripts/export_dashboard_data.py                # last 7 days (default)
+    uv run python scripts/export_dashboard_data.py --days 15      # last 15 days
+
+Options:
+    --days N                       # days of lookback before the last complete day (default: 7)
+"""
 
 from __future__ import annotations
 
+import argparse
 import shutil
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
 from polars.dataframe.frame import DataFrame
-from polars.lazyframe.frame import LazyFrame
 
 from core.config import settings
-from core.helpers.logger import cyan, get_logger, green, magenta, yellow
+from core.helpers.logger import cyan, get_logger, green, magenta
 from core.helpers.s3 import S3_STORAGE_OPTIONS
 
-_SIZE_WARN_MB = 90
+DEFAULT_DAYS: int = 7
 
 OUTPUT_DIR = Path(settings.dashboard.static_data_path)
 
@@ -35,39 +44,52 @@ _DIM_COLS = {
 }
 
 
-def export_dashboard_data(days: int = 7) -> None:
+def export_dashboard_data(days: int = DEFAULT_DAYS) -> None:
     """
     Export static Parquet files for the Streamlit dashboard.
 
     Args:
-        days: Number of complete days to export
+        days: Days of lookback before the last complete day. The window is
+            inclusive, so N yields N+1 calendar days, clamped to the days
+            actually present in gold.
     """
     logger = get_logger(__name__)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # latest day in gold
-    max_day: date = (
-        pl.scan_delta(source=_MINIO_GOLD, storage_options=S3_STORAGE_OPTIONS)
-        .select(pl.col(name="day").max())
-        .collect()
-        .item()
-    )
+    # the current UTC day is still in progress, so it never enters the window
+    last_complete_day: date = datetime.now(UTC).date() - timedelta(days=1)
 
-    min_day: date = max_day - timedelta(days=days)
+    window: DataFrame = (
+        pl.scan_delta(source=_MINIO_GOLD, storage_options=S3_STORAGE_OPTIONS)
+        .select(
+            pl.col(name="day").min().alias("first_day"),
+            pl.col(name="day")
+            .filter(pl.col(name="day") <= last_complete_day)
+            .max()
+            .alias("last_day"),
+        )
+        .collect()
+    )
+    first_day: date | None = window.item(row=0, column="first_day")
+    max_day: date | None = window.item(row=0, column="last_day")
+
+    if max_day is None or first_day is None:
+        msg = f"no complete day in gold (latest elapsed UTC day: {last_complete_day}) — run `make pipeline` first"
+        raise RuntimeError(msg)
+
+    min_day: date = max(first_day, max_day - timedelta(days=days))
 
     logger.info(
         "range: %s → %s  (%d days)",
         cyan(text=str(object=min_day)),
         cyan(text=str(object=max_day)),
-        days,
+        (max_day - min_day).days + 1,
     )
 
-    # delete exported files if they already exist
-    gold_daily_activity_path: Path = OUTPUT_DIR / "gold" / "daily_activity.parquet"
-    if gold_daily_activity_path.exists():
-        shutil.rmtree(path=gold_daily_activity_path, ignore_errors=True)
-
     # export gold metrics
+    gold_daily_activity_path: Path = OUTPUT_DIR / "gold" / "daily_activity.parquet"
+    _reset_path(path=gold_daily_activity_path)
+
     (
         pl.scan_delta(source=_MINIO_GOLD, storage_options=S3_STORAGE_OPTIONS)
         .filter(
@@ -89,40 +111,30 @@ def export_dashboard_data(days: int = 7) -> None:
     start_dt: datetime = datetime.combine(date=min_day, time=datetime.min.time())
     end_dt: datetime = datetime.combine(date=max_day + timedelta(days=1), time=datetime.min.time())
 
-    # delete exported files if they already exist
-    silver_events_path: Path = OUTPUT_DIR / "silver" / "events"
-    if silver_events_path.exists():
-        shutil.rmtree(path=silver_events_path, ignore_errors=True)
+    # export silver events as a single file
+    silver_events_path: Path = OUTPUT_DIR / "silver" / "events.parquet"
+    _reset_path(path=silver_events_path)
 
-    # export silver events (partitioned by day)
-    lf: LazyFrame = (
+    (
         pl.scan_delta(source=_MINIO_SILVER["events"], storage_options=S3_STORAGE_OPTIONS)
         .filter(
             pl.col(name="created_at").is_between(
-                lower_bound=start_dt, upper_bound=end_dt, closed="both"
+                lower_bound=start_dt, upper_bound=end_dt, closed="left"
             )
         )
-        .with_columns(date=pl.col(name="created_at").dt.date())
+        .drop("year", "month", "day", "hour")
+        .sink_parquet(
+            path=str(object=silver_events_path),
+            compression="zstd",
+            mkdir=True,
+        )
     )
-
-    df: DataFrame = lf.collect().drop("year", "month", "day", "hour")
-
-    df.write_parquet(
-        file=str(object=silver_events_path),
-        partition_by=["date"],
-        compression="zstd",
-    )
-
-    for p in sorted(silver_events_path.iterdir()):
-        if p.is_dir():
-            _log_size(path=p, label=f"silver/events/{p.name}", logger=logger)
+    _log_size(path=silver_events_path, label="silver/events", logger=logger)
 
     # export silver actors, repos and orgs dimensions (deduplicated)
     for dim_name in ("actors", "repos", "orgs"):
-        # delete exported files if they already exist
         output_path: Path = OUTPUT_DIR / "silver" / f"{dim_name}.parquet"
-        if output_path.exists():
-            shutil.rmtree(path=output_path, ignore_errors=True)
+        _reset_path(path=output_path)
 
         pl.scan_delta(
             source=_MINIO_SILVER[dim_name],
@@ -145,27 +157,30 @@ def export_dashboard_data(days: int = 7) -> None:
     )
 
 
-def _log_size(path: Path, label: str, logger) -> None:
-    """Log the size of a file or directory."""
-    size_mb: int | float = (
-        path.stat().st_size
-        if path.is_file()
-        else sum(f.stat().st_size for f in path.rglob(pattern="*.parquet"))
-    ) / (1024 * 1024)
-
-    if size_mb > _SIZE_WARN_MB:
-        logger.warning(
-            "%s — %.1f MB (near GitHub limit)",
-            yellow(text=label),
-            size_mb,
-        )
+def _reset_path(path: Path) -> None:
+    """Remove a previous export at `path` (file or directory) so the write starts clean."""
+    if path.is_dir():
+        shutil.rmtree(path=path, ignore_errors=True)
     else:
-        logger.info(
-            "%s — %s",
-            green(text=label),
-            magenta(text=f"{size_mb:.1f} MB"),
-        )
+        path.unlink(missing_ok=True)
+
+
+def _log_size(path: Path, label: str, logger) -> None:
+    """Log the size of an exported Parquet file."""
+    size_mb: float = path.stat().st_size / (1024 * 1024)
+    logger.info("%s — %s", green(text=label), magenta(text=f"{size_mb:.1f} MB"))
 
 
 if __name__ == "__main__":
-    export_dashboard_data(days=7)
+    parser = argparse.ArgumentParser(
+        description="Export static Parquet files for the public Streamlit dashboard."
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=DEFAULT_DAYS,
+        help=f"days of lookback before the last complete day (default: {DEFAULT_DAYS})",
+    )
+    args = parser.parse_args()
+
+    export_dashboard_data(days=args.days)
