@@ -34,3 +34,6 @@ htmlcov/
 .AppleDouble
 .LSOverride
 **/.DS_Store
+
+# Exported data files
+/dashboard/data/*
