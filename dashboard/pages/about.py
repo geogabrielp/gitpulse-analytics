@@ -28,6 +28,7 @@ st.markdown(
 | :material/transform: Transform & Query | **Polars** | Lazy, zero-copy, multi-core DataFrames for ETL and analytics |
 | :material/verified: Contracts | **Pandera** | Runtime data validation at every layer |
 | :material/dashboard: Dashboard | **Streamlit** | Interactive frontend with cached queries |
+| :material/database: Public data | **Hugging Face Datasets** | Parquet snapshot read by this public dashboard |
 | :material/package: Deps | **uv** | Fast Python package manager (no pip) |
 """
 )

@@ -4,7 +4,10 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 COMMON_CONFIG: dict = dict(
-    env_file=(".env", ".env.example"),
+    env_file=(
+        ".env.example",
+        ".env",
+    ),
     env_file_encoding="utf-8",
     extra="ignore",
 )
@@ -47,7 +50,8 @@ class PrefectSettings(BaseSettings):
 class DashboardSettings(BaseSettings):
     # dashboard settings
     # NOTE: reads ONLY from .env (not .env.example) so that on Streamlit
-    # Community Cloud the default data_source="static" is used.
+    # Community Cloud the code defaults are used: the public app reads the
+    # Hugging Face dataset, while `make install` sets .env to MinIO locally.
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -55,10 +59,11 @@ class DashboardSettings(BaseSettings):
         env_prefix="DASHBOARD_",
     )
 
-    data_source: str = "static"  # default to public dashboard
+    data_source: str = "hf"  # "minio" = local dev, anything else = Hugging Face
     title: str = "GitPulse Analytics"
     cache_ttl: int = 3600
-    static_data_path: str = "dashboard/data"
+    export_path: str = "dashboard/data"  # staging for the Hugging Face upload
+    hf_dataset: str = "geogabrielp/gitpulse-analytics"
 
 
 class Settings(BaseSettings):

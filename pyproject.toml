@@ -12,6 +12,7 @@ requires-python = ">=3.12"
 dependencies = [
     "colorlog>=6.10.1",
     "deltalake>=1.6.0",
+    "huggingface-hub>=2.2.0",
     "pandera[polars]>=0.31.1",
     "polars>=1.40.1",
     "prefect>=3.6.29",

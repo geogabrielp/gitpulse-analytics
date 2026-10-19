@@ -25,7 +25,7 @@ from core.helpers.s3 import S3_STORAGE_OPTIONS
 
 DEFAULT_DAYS: int = 7
 
-OUTPUT_DIR = Path(settings.dashboard.static_data_path)
+OUTPUT_DIR = Path(settings.dashboard.export_path)
 
 _MINIO_SILVER = {
     "orgs": f"s3://{settings.minio.bucket_silver}/github/orgs",

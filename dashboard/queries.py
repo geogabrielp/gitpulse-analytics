@@ -1,19 +1,20 @@
 """
 Dual-mode data reader for the GitPulse dashboard.
 
-DASHBOARD_DATA_SOURCE=minio reads Delta tables from MinIO
-static (default) reads Parquet files from dashboard/data/
+DASHBOARD_DATA_SOURCE=minio reads Delta tables from the local MinIO lake (development)
+hf (default) downloads the exported Parquet dataset from Hugging Face into the local
+Hub cache on first use, then scans it from disk (public dashboard)
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
 import streamlit as st
 from botocore.exceptions import EndpointConnectionError
+from huggingface_hub import hf_hub_download
 from polars import DataFrame, LazyFrame
 
 from core.config import settings
@@ -25,34 +26,52 @@ _logger = get_logger(__name__)
 if settings.dashboard.data_source == "minio":
     _logger.info("Using MinIO (delta tables) as data source")
 else:
-    _logger.info("Using static Parquet files as data source")
+    _logger.info("Using Hugging Face dataset %s as data source", settings.dashboard.hf_dataset)
 
-# MinIO paths
-GOLD_DAILY = f"s3://{settings.minio.bucket_gold}/github/daily_activity"
-SILVER_EVENTS = f"s3://{settings.minio.bucket_silver}/github/events"
-SILVER_ACTORS = f"s3://{settings.minio.bucket_silver}/github/actors"
-SILVER_REPOS = f"s3://{settings.minio.bucket_silver}/github/repos"
-SILVER_ORGS = f"s3://{settings.minio.bucket_silver}/github/orgs"
+# MinIO Delta paths (development)
+_MINIO_PATHS: dict[str, str] = {
+    "gold": f"s3://{settings.minio.bucket_gold}/github/daily_activity",
+    "events": f"s3://{settings.minio.bucket_silver}/github/events",
+    "actors": f"s3://{settings.minio.bucket_silver}/github/actors",
+    "repos": f"s3://{settings.minio.bucket_silver}/github/repos",
+    "orgs": f"s3://{settings.minio.bucket_silver}/github/orgs",
+}
 
-# Static data path (for parquet files exported)
-STATIC: str = settings.dashboard.static_data_path
+# Hugging Face Parquet paths (public dashboard) — same layout as the export
+_HF_PATHS: dict[str, str] = {
+    "gold": "gold/daily_activity.parquet",
+    "events": "silver/events.parquet",
+    "actors": "silver/actors.parquet",
+    "repos": "silver/repos.parquet",
+    "orgs": "silver/orgs.parquet",
+}
 
 
 # Internal helpers
 def _show_infra_error() -> None:
-    """Display a friendly error when the data lake is unreachable or empty."""
+    """Display a friendly error when the selected data source is unreachable."""
+    if settings.dashboard.data_source == "minio":
+        body = (
+            "## \U0001f4a8 Data Lake not available\n\n"
+            "The dashboard cannot load data. This usually means one of the following:\n\n"
+            "1. **Infrastructure is not running** \u2014 start MinIO and services:\n\n"
+            "   ```bash\n"
+            "   make up\n"
+            "   ```\n\n"
+            "2. **No data in the Gold layer yet** \u2014 run the ETL pipeline:\n\n"
+            "   ```bash\n"
+            "   make pipeline\n"
+            "   ```"
+        )
+    else:
+        body = (
+            "## \U0001f4a8 Data source not available\n\n"
+            "The dashboard cannot reach the Hugging Face dataset "
+            f"`{settings.dashboard.hf_dataset}`. Check your network connection "
+            "and the dataset's availability."
+        )
     st.error(
-        body="## \U0001f4a8 Data Lake not available\n\n"
-        "The dashboard cannot load data. This usually means one of the following:\n\n"
-        "1. **Infrastructure is not running** \u2014 start MinIO and services:\n\n"
-        "   ```bash\n"
-        "   make up\n"
-        "   ```\n\n"
-        "2. **No data in the Gold layer yet** \u2014 run the ETL pipeline:\n\n"
-        "   ```bash\n"
-        "   make pipeline\n"
-        "   ```\n\n"
-        "After resolving the issue, **refresh this page** to retry.",
+        body=body + "\n\nAfter resolving the issue, **refresh this page** to retry.",
         icon=":material/database_off:",
     )
     st.stop()
@@ -69,54 +88,48 @@ def _check_minio_connection() -> None:
         _show_infra_error()
 
 
-# Internal LazyFrame readers (one per table, dual-mode)
-def _gold_lf() -> LazyFrame:
-    """Return a LazyFrame over gold_daily metrics (MinIO Delta or static Parquet)."""
+# Internal LazyFrame readers
+@st.cache_resource
+def _hf_file(rel_path: str) -> str:
+    """Download a dataset file into the local Hub cache once and return its path."""
+    return hf_hub_download(
+        repo_id=settings.dashboard.hf_dataset,
+        filename=rel_path,
+        repo_type="dataset",
+    )
+
+
+def _lf(table: str) -> LazyFrame:
+    """Return a LazyFrame over one dashboard table (MinIO Delta or cached HF Parquet)."""
     if settings.dashboard.data_source == "minio":
         _check_minio_connection()
-        return pl.scan_delta(source=GOLD_DAILY, storage_options=S3_STORAGE_OPTIONS)
-    return pl.scan_parquet(source=f"{STATIC}/gold/daily_activity.parquet")
+        return pl.scan_delta(source=_MINIO_PATHS[table], storage_options=S3_STORAGE_OPTIONS)
+    return pl.scan_parquet(source=_hf_file(_HF_PATHS[table]))
+
+
+def _gold_lf() -> LazyFrame:
+    """Return a LazyFrame over gold_daily metrics."""
+    return _lf(table="gold")
 
 
 def _actors_lf() -> LazyFrame:
-    """Return a LazyFrame over actors dimension (MinIO Delta or static Parquet)."""
-    if settings.dashboard.data_source == "minio":
-        _check_minio_connection()
-        return pl.scan_delta(source=SILVER_ACTORS, storage_options=S3_STORAGE_OPTIONS)
-    return pl.scan_parquet(source=f"{STATIC}/silver/actors.parquet")
+    """Return a LazyFrame over the actors dimension."""
+    return _lf(table="actors")
 
 
 def _repos_lf() -> LazyFrame:
-    """Return a LazyFrame over repos dimension (MinIO Delta or static Parquet)."""
-    if settings.dashboard.data_source == "minio":
-        _check_minio_connection()
-        return pl.scan_delta(source=SILVER_REPOS, storage_options=S3_STORAGE_OPTIONS)
-    return pl.scan_parquet(source=f"{STATIC}/silver/repos.parquet")
+    """Return a LazyFrame over the repos dimension."""
+    return _lf(table="repos")
 
 
 def _orgs_lf() -> LazyFrame:
-    """Return a LazyFrame over orgs dimension (MinIO Delta or static Parquet)."""
-    if settings.dashboard.data_source == "minio":
-        _check_minio_connection()
-        return pl.scan_delta(source=SILVER_ORGS, storage_options=S3_STORAGE_OPTIONS)
-    return pl.scan_parquet(source=f"{STATIC}/silver/orgs.parquet")
+    """Return a LazyFrame over the orgs dimension."""
+    return _lf(table="orgs")
 
 
 def _silver_events_lf() -> LazyFrame:
-    """
-    Return a LazyFrame over silver events.
-
-    Raises RuntimeError if static Parquet hasn't been exported yet.
-    """
-    if settings.dashboard.data_source == "minio":
-        _check_minio_connection()
-        return pl.scan_delta(source=SILVER_EVENTS, storage_options=S3_STORAGE_OPTIONS)
-
-    path = f"{STATIC}/silver/events"
-    if not Path(path).is_dir():
-        msg = "Silver events not found in static data. Run `make export-data` first."
-        raise RuntimeError(msg)
-    return pl.scan_parquet(source=path)
+    """Return a LazyFrame over silver events."""
+    return _lf(table="events")
 
 
 # Overview page
@@ -151,19 +164,14 @@ def get_overview_kpis(
     kpis["avg_gitpulse_score"] = row[4]
 
     # Unique contributors from silver events
-    try:
-        events: LazyFrame = _silver_events_lf().filter(
-            pl.col(name="created_at").is_between(
-                lower_bound=datetime.combine(date=start, time=datetime.min.time()),
-                upper_bound=datetime.combine(date=end, time=datetime.min.time()),
-                closed="both",
-            )
+    events: LazyFrame = _silver_events_lf().filter(
+        pl.col(name="created_at").is_between(
+            lower_bound=datetime.combine(date=start, time=datetime.min.time()),
+            upper_bound=datetime.combine(date=end, time=datetime.min.time()),
+            closed="both",
         )
-        kpis["unique_contributors"] = (
-            events.select(pl.col(name="actor_id").n_unique()).collect().item()
-        )
-    except RuntimeError:
-        kpis["unique_contributors"] = None
+    )
+    kpis["unique_contributors"] = events.select(pl.col(name="actor_id").n_unique()).collect().item()
 
     return kpis
 
@@ -311,29 +319,26 @@ def get_daily_heatmap(
     event_type: str | None = None,
 ) -> DataFrame:
     """Return event count by day-of-week x hour (last 7 days only)."""
-    try:
-        heatmap_start: date = end - timedelta(days=7)
-        events: LazyFrame = _silver_events_lf().filter(
-            pl.col(name="created_at").is_between(
-                lower_bound=datetime.combine(date=heatmap_start, time=datetime.min.time()),
-                upper_bound=datetime.combine(date=end, time=datetime.min.time()),
-                closed="both",
-            )
+    heatmap_start: date = end - timedelta(days=7)
+    events: LazyFrame = _silver_events_lf().filter(
+        pl.col(name="created_at").is_between(
+            lower_bound=datetime.combine(date=heatmap_start, time=datetime.min.time()),
+            upper_bound=datetime.combine(date=end, time=datetime.min.time()),
+            closed="both",
         )
-        if event_type:
-            events: LazyFrame = events.filter(pl.col(name="type") == event_type)
-        return (
-            events.with_columns(
-                dow=(pl.col(name="created_at").dt.weekday() % 7).cast(dtype=pl.Int16),
-                hour=pl.col(name="created_at").dt.hour().cast(dtype=pl.Int16),
-            )
-            .group_by("dow", "hour")
-            .agg(events=pl.len().cast(dtype=pl.Int64))
-            .sort(by=["dow", "hour"])
-            .collect()
+    )
+    if event_type:
+        events = events.filter(pl.col(name="type") == event_type)
+    return (
+        events.with_columns(
+            dow=(pl.col(name="created_at").dt.weekday() % 7).cast(dtype=pl.Int16),
+            hour=pl.col(name="created_at").dt.hour().cast(dtype=pl.Int16),
         )
-    except RuntimeError:
-        return DataFrame()
+        .group_by("dow", "hour")
+        .agg(events=pl.len().cast(dtype=pl.Int64))
+        .sort(by=["dow", "hour"])
+        .collect()
+    )
 
 
 @st.cache_data(ttl=settings.dashboard.cache_ttl, show_spinner=False)
@@ -343,29 +348,26 @@ def get_top_contributors(
     limit: int = 50,
 ) -> DataFrame:
     """Return top N contributors."""
-    try:
-        events: LazyFrame = _silver_events_lf().filter(
-            pl.col(name="created_at").is_between(
-                lower_bound=datetime.combine(date=start, time=datetime.min.time()),
-                upper_bound=datetime.combine(date=end, time=datetime.min.time()),
-                closed="both",
-            )
+    events: LazyFrame = _silver_events_lf().filter(
+        pl.col(name="created_at").is_between(
+            lower_bound=datetime.combine(date=start, time=datetime.min.time()),
+            upper_bound=datetime.combine(date=end, time=datetime.min.time()),
+            closed="both",
         )
-        actors: LazyFrame = _actors_lf()
-        return (
-            events.join(other=actors, left_on="actor_id", right_on="id", how="left")
-            .group_by("login", "is_bot")
-            .agg(
-                events=pl.len().cast(dtype=pl.Int64),
-                repos=pl.col(name="repo_id").n_unique().cast(dtype=pl.Int64),
-                prs=pl.col(name="type").eq(other="PullRequestEvent").sum().cast(dtype=pl.Int64),
-            )
-            .sort(by="events", descending=True)
-            .limit(n=limit)
-            .collect()
+    )
+    actors: LazyFrame = _actors_lf()
+    return (
+        events.join(other=actors, left_on="actor_id", right_on="id", how="left")
+        .group_by("login", "is_bot")
+        .agg(
+            events=pl.len().cast(dtype=pl.Int64),
+            repos=pl.col(name="repo_id").n_unique().cast(dtype=pl.Int64),
+            prs=pl.col(name="type").eq(other="PullRequestEvent").sum().cast(dtype=pl.Int64),
         )
-    except RuntimeError:
-        return DataFrame()
+        .sort(by="events", descending=True)
+        .limit(n=limit)
+        .collect()
+    )
 
 
 @st.cache_data(ttl=settings.dashboard.cache_ttl, show_spinner=False)
@@ -374,25 +376,22 @@ def get_contributors_over_time(
     end: date,
 ) -> DataFrame:
     """Return unique actor count per day."""
-    try:
-        events: LazyFrame = _silver_events_lf().filter(
-            pl.col(name="created_at").is_between(
-                lower_bound=datetime.combine(date=start, time=datetime.min.time()),
-                upper_bound=datetime.combine(date=end, time=datetime.min.time()),
-                closed="both",
-            )
+    events: LazyFrame = _silver_events_lf().filter(
+        pl.col(name="created_at").is_between(
+            lower_bound=datetime.combine(date=start, time=datetime.min.time()),
+            upper_bound=datetime.combine(date=end, time=datetime.min.time()),
+            closed="both",
         )
-        actors: LazyFrame = _actors_lf()
-        return (
-            events.join(other=actors, left_on="actor_id", right_on="id", how="left")
-            .with_columns(day=pl.col(name="created_at").dt.date())
-            .group_by("day", "is_bot")
-            .agg(contributors=pl.col(name="actor_id").n_unique().cast(dtype=pl.Int64))
-            .sort(by=["day", "is_bot"])
-            .collect()
-        )
-    except RuntimeError:
-        return DataFrame()
+    )
+    actors: LazyFrame = _actors_lf()
+    return (
+        events.join(other=actors, left_on="actor_id", right_on="id", how="left")
+        .with_columns(day=pl.col(name="created_at").dt.date())
+        .group_by("day", "is_bot")
+        .agg(contributors=pl.col(name="actor_id").n_unique().cast(dtype=pl.Int64))
+        .sort(by=["day", "is_bot"])
+        .collect()
+    )
 
 
 @st.cache_data(ttl=settings.dashboard.cache_ttl, show_spinner=False)
@@ -401,25 +400,22 @@ def get_bot_vs_human(
     end: date,
 ) -> DataFrame:
     """Return daily event count split by is_bot."""
-    try:
-        events: LazyFrame = _silver_events_lf().filter(
-            pl.col(name="created_at").is_between(
-                lower_bound=datetime.combine(date=start, time=datetime.min.time()),
-                upper_bound=datetime.combine(date=end, time=datetime.min.time()),
-                closed="both",
-            )
+    events: LazyFrame = _silver_events_lf().filter(
+        pl.col(name="created_at").is_between(
+            lower_bound=datetime.combine(date=start, time=datetime.min.time()),
+            upper_bound=datetime.combine(date=end, time=datetime.min.time()),
+            closed="both",
         )
-        actors: LazyFrame = _actors_lf()
-        return (
-            events.join(other=actors, left_on="actor_id", right_on="id", how="left")
-            .with_columns(day=pl.col(name="created_at").dt.date())
-            .group_by("day", "is_bot")
-            .agg(events=pl.len().cast(dtype=pl.Int64))
-            .sort(by=["day", "is_bot"])
-            .collect()
-        )
-    except RuntimeError:
-        return DataFrame()
+    )
+    actors: LazyFrame = _actors_lf()
+    return (
+        events.join(other=actors, left_on="actor_id", right_on="id", how="left")
+        .with_columns(day=pl.col(name="created_at").dt.date())
+        .group_by("day", "is_bot")
+        .agg(events=pl.len().cast(dtype=pl.Int64))
+        .sort(by=["day", "is_bot"])
+        .collect()
+    )
 
 
 # Development page
@@ -451,26 +447,23 @@ def get_pr_bot_breakdown(
     end: date,
 ) -> DataFrame:
     """Return PR event count split by bot vs human."""
-    try:
-        events: LazyFrame = _silver_events_lf().filter(
-            pl.col(name="created_at").is_between(
-                lower_bound=datetime.combine(date=start, time=datetime.min.time()),
-                upper_bound=datetime.combine(date=end, time=datetime.min.time()),
-                closed="both",
-            ),
-            pl.col(name="type") == "PullRequestEvent",
-        )
-        actors: LazyFrame = _actors_lf()
-        return (
-            events.join(other=actors, left_on="actor_id", right_on="id", how="left")
-            .with_columns(day=pl.col(name="created_at").dt.date())
-            .group_by("day", "is_bot")
-            .agg(prs=pl.len().cast(dtype=pl.Int64))
-            .sort(by=["day", "is_bot"])
-            .collect()
-        )
-    except RuntimeError:
-        return DataFrame()
+    events: LazyFrame = _silver_events_lf().filter(
+        pl.col(name="created_at").is_between(
+            lower_bound=datetime.combine(date=start, time=datetime.min.time()),
+            upper_bound=datetime.combine(date=end, time=datetime.min.time()),
+            closed="both",
+        ),
+        pl.col(name="type") == "PullRequestEvent",
+    )
+    actors: LazyFrame = _actors_lf()
+    return (
+        events.join(other=actors, left_on="actor_id", right_on="id", how="left")
+        .with_columns(day=pl.col(name="created_at").dt.date())
+        .group_by("day", "is_bot")
+        .agg(prs=pl.len().cast(dtype=pl.Int64))
+        .sort(by=["day", "is_bot"])
+        .collect()
+    )
 
 
 @st.cache_data(ttl=settings.dashboard.cache_ttl, show_spinner=False)
