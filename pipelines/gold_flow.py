@@ -76,7 +76,7 @@ def gold_transform_flow(batch_size_days: int = 7) -> None:
         "total time taken: %s seconds",
         yellow(f"{timer_end - timer_start:.2f}"),
     )
-    logger.info("Gold transform completed, check at http://localhost:9001/browser/gold/")
+    logger.info("Gold transform completed, check at http://localhost:9011/browser/gold/")
 
 
 __all__: list[str] = ["gold_transform_flow"]

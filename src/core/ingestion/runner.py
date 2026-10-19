@@ -98,4 +98,4 @@ def run_ingestion(days: int, max_workers: int) -> None:
         yellow(skipped),
         red(failed),
     )
-    logger.info("Ingestion completed, check at http://localhost:9001/browser/bronze/")
+    logger.info("Ingestion completed, check at http://localhost:9011/browser/bronze/")

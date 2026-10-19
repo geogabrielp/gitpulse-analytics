@@ -4,8 +4,10 @@ services:
     image: minio/minio:latest
     container_name: minio
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # host ports 9010/9011: VS Code's Jupyter extension binds 9000-9004
+      # on 127.0.0.1 for its kernel ZMQ sockets
+      - "9010:9000"
+      - "9011:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -50,7 +52,7 @@ services:
     environment:
       PREFECT_API_DATABASE_CONNECTION_URL: ${PREFECT_API_DATABASE_CONNECTION_URL}
       PREFECT_SERVER_API_HOST: ${PREFECT_SERVER_API_HOST}
-      PREFECT_SERVER_UI_API_URL: ${PREFECT_SERVER_UI_API_URL}
+      PREFECT_SERVER_UI_API_URL: ${PREFECT_API_URL:-http://localhost:4200/api}
     command: prefect server start
     depends_on:
       postgres:

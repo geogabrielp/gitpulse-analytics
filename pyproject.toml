@@ -37,6 +37,10 @@ dev = [
 [tool.uv]
 managed = true
 
+# Prefect API configuration
+[tool.prefect.api]
+url = "http://localhost:4200/api"
+
 # allow direct references to local packages for development
 [tool.hatch.metadata]
 allow-direct-references = true

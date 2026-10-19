@@ -4,7 +4,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 COMMON_CONFIG: dict = dict(
-    env_file=".env.example",
+    env_file=(".env", ".env.example"),
     env_file_encoding="utf-8",
     extra="ignore",
 )
@@ -41,7 +41,7 @@ class PrefectSettings(BaseSettings):
         **COMMON_CONFIG, env_prefix="PREFECT_"
     )
 
-    server_ui_api_url: str
+    api_url: str = "http://localhost:4200/api"
 
 
 class DashboardSettings(BaseSettings):

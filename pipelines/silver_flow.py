@@ -71,4 +71,4 @@ def silver_transform_flow(batch_size: int = 12) -> None:
         "total time taken: %s seconds",
         yellow(f"{timer_end - timer_start:.2f}"),
     )
-    logger.info("Transform completed, check at http://localhost:9001/browser/silver/")
+    logger.info("Transform completed, check at http://localhost:9011/browser/silver/")
