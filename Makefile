@@ -18,7 +18,7 @@ help:
 	@echo "   make reset:    Remove all data and volumes. WARNING: destructive!"
 	@echo ""
 	@echo "[APPLICATION]"
-	@echo "   make install:  Install dependencies with uv"
+	@echo "   make install:  Create .env and install dependencies with uv"
 	@echo ""
 	@echo "[DEVELOPMENT]"
 	@echo "   make format:    Format code with ruff"
@@ -37,27 +37,28 @@ help:
 	@echo
 
 up:
-	docker compose --env-file .env.example up -d --wait
+	docker compose up -d --wait
 	uv run python infra/scripts/init_minio.py
 
 down:
-	docker compose --env-file .env.example down
+	docker compose down
 
 restart:
-	docker compose --env-file .env.example down
-	docker compose --env-file .env.example up -d
+	docker compose down
+	docker compose up -d
 
 logs:
-	docker compose --env-file .env.example logs -f
+	docker compose logs -f
 
 ps:
-	docker compose --env-file .env.example ps
+	docker compose ps
 
 reset:
-	docker compose --env-file .env.example down -v --remove-orphans
+	docker compose down -v --remove-orphans
 	docker system prune -f
 
 install:
+	@[ -f .env ] || cp .env.example .env
 	uv sync
 
 format:

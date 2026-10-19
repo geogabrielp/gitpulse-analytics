@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Environment variables
+.env
+
 # Local notebooks (data exploration and visualization only)
 notebooks/
 
