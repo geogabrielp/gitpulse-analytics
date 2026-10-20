@@ -72,3 +72,7 @@ def silver_transform_flow(batch_size: int = 12) -> None:
         yellow(f"{timer_end - timer_start:.2f}"),
     )
     logger.info("Transform completed, check at http://localhost:9011/browser/silver/")
+
+    # Fail the run when any batch failed
+    if failed:
+        raise RuntimeError(f"{failed}/{total} batches failed")

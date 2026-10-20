@@ -78,5 +78,9 @@ def gold_transform_flow(batch_size_days: int = 7) -> None:
     )
     logger.info("Gold transform completed, check at http://localhost:9011/browser/gold/")
 
+    # Fail the run when any batch failed
+    if failed:
+        raise RuntimeError(f"{failed}/{total} batches failed")
+
 
 __all__: list[str] = ["gold_transform_flow"]
