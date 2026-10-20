@@ -1,7 +1,9 @@
 services:
   # local datalake with minio s3
   minio:
-    image: minio/minio:latest
+    # MinIO stopped publishing community images (minio/minio is gone from
+    # Docker Hub and quay.io), pgsty/silo is a maintained drop-in fork.
+    image: pgsty/silo:latest
     container_name: minio
     ports:
       # host ports 9010/9011: VS Code's Jupyter extension binds 9000-9004
