@@ -37,10 +37,13 @@ def render(kpis: dict[str, int | float | None]) -> None:
             border=True,
         )
     with row1[3]:
-        score = kpis.get("avg_gitpulse_score")
+        pct_active = kpis.get("pct_repo_days_score_ge10")
         st.metric(
-            label=":material/star: GitPulse score",
-            value=f"{score:.1f}" if score is not None else "N/A",
-            help="Average GitPulse score across active repositories.",
+            label=":material/star: GitPulse score ≥ 10",
+            value=f"{pct_active:.1f}%" if pct_active is not None else "N/A",
+            help=(
+                "Share of active repository-days scoring 10 or more "
+                "(roughly 10 pushes or 2 PRs in a day)."
+            ),
             border=True,
         )

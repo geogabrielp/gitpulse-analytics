@@ -47,8 +47,9 @@ st.subheader(body=":material/function: GitPulse Score Formula")
 
 st.markdown(
     body="""
-    A **daily score** (0–100) that captures repository vitality from four weighted
-    GitHub event types. The higher the number, the more active the project on that day:
+    A **daily activity index** (0–100) built from four weighted GitHub event types.
+    It measures how much a repository did on a given day, not how healthy or
+    important it is:
     """
 )
 
@@ -70,11 +71,11 @@ st.markdown(
 | Event type | Weight |
 |---|---|
 | **PushEvent** (commits pushed) | $w = 1$ |
-| **PullRequestEvent** (PR opened/closed/merged) | $w = 5$ |
-| **IssuesEvent** (issue opened/closed) | $w = 3$ |
+| **PullRequestEvent** (every PR action: opened, merged, labeled…) | $w = 5$ |
+| **IssuesEvent** (every issue action: opened, closed, labeled…) | $w = 3$ |
 | **WatchEvent** (repository starred) | $w = 2$ |
 
-The raw weighted sum is capped at 1.0 before scaling to 100, ensuring a
-**bounded 0–100 score** regardless of event volume.
+The weighted sum is capped at 100, so the score stays **bounded** regardless of
+event volume.
 """
 )

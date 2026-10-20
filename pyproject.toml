@@ -64,8 +64,8 @@ select = [
     "I",   # isort
     "UP",  # pyupgrade
     "B",   # flake8-bugbear
-    "SIM", # flake8-simplify (sugere código mais simples)
-    "PT",  # flake8-pytest-style (melhor prática em testes)
+    "SIM", # flake8-simplify (code simplification)
+    "PT",  # flake8-pytest-style (pytest best practices)
     "PL",  # pylint
     "C90", # mccabe (code complexity)
 ]

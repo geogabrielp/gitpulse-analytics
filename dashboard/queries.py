@@ -23,6 +23,9 @@ from core.helpers.s3 import S3_STORAGE_OPTIONS, get_s3_fs
 
 _logger = get_logger(__name__)
 
+# Repo-day score above which the day counts as "real work" (~10 pushes or 2 PRs)
+_SCORE_ACTIVE_THRESHOLD: int = 10
+
 if settings.dashboard.data_source == "minio":
     _logger.info("Using MinIO (delta tables) as data source")
 else:
@@ -152,7 +155,8 @@ def get_overview_kpis(
             active_repos=pl.col(name="repo_id").n_unique(),
             avg_pr_merge_rate=pl.col(name="pr_merge_rate").mean(),
             avg_issue_close_rate=pl.col(name="issue_close_rate").mean(),
-            avg_gitpulse_score=pl.col(name="gitpulse_score").mean(),
+            pct_repo_days_score_ge10=100.0
+            * (pl.col(name="gitpulse_score") >= _SCORE_ACTIVE_THRESHOLD).mean(),
         )
         .collect()
         .row(index=0)
@@ -161,7 +165,7 @@ def get_overview_kpis(
     kpis["active_repos"] = row[1]
     kpis["avg_pr_merge_rate"] = row[2]
     kpis["avg_issue_close_rate"] = row[3]
-    kpis["avg_gitpulse_score"] = row[4]
+    kpis["pct_repo_days_score_ge10"] = row[4]
 
     # Unique contributors from silver events
     events: LazyFrame = _silver_events_lf().filter(

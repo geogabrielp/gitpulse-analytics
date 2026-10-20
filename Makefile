@@ -32,7 +32,7 @@ help:
 	@echo ""
 	@echo "[PIPELINE]"
 	@echo "   make pipeline:    Run the full ETL pipeline (bronze + silver + gold)"
-	@echo "   make export-data: Export MinIO data to static Parquet for dashboard"
+	@echo "   make export-data: Export lake tables to Parquet for the public HF snapshot"
 	@echo "   make dashboard:   Launch the Streamlit dashboard"
 	@echo "   make serve:       Serve the hourly pipeline (long-running process)"
 	@echo
