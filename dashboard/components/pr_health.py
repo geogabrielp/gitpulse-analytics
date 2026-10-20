@@ -196,7 +196,7 @@ def render_pr_bot_comparison(pr_bot_data: DataFrame) -> None:
         index="day", columns="is_bot", values="prs", aggfunc="sum", fill_value=0
     ).sort_index()
 
-    days = pivoted.index.strftime("%Y-%m-%d").to_list()
+    days = [d.strftime("%Y-%m-%d") for d in pivoted.index]
     human_prs: list[int] = [
         int(v) for v in pivoted.get(key=False, default=pd.Series(data=[0] * len(pivoted))).tolist()
     ]

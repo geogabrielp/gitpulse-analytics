@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import streamlit as st
 from polars.dataframe.frame import DataFrame
@@ -82,10 +82,10 @@ except Exception:
 progress_holder.empty()
 
 # Period averages
-overall_merge_rate = pr_metrics["avg_merge_rate"].mean() if not pr_metrics.is_empty() else None
-overall_close_rate = (
-    issue_metrics["avg_close_rate"].mean() if not issue_metrics.is_empty() else None
-)
+merge_rate_mean = pr_metrics["avg_merge_rate"].mean() if not pr_metrics.is_empty() else None
+close_rate_mean = issue_metrics["avg_close_rate"].mean() if not issue_metrics.is_empty() else None
+overall_merge_rate = float(cast(float, merge_rate_mean)) if merge_rate_mean is not None else None
+overall_close_rate = float(cast(float, close_rate_mean)) if close_rate_mean is not None else None
 
 # Compute review totals for the top cards
 if not review_data.is_empty():

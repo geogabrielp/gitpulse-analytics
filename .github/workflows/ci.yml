@@ -28,12 +28,14 @@ jobs:
       - name: Lint with ruff
         run: uv run ruff check .
 
+      - name: Check formatting with ruff
+        run: uv run ruff format --check .
+
       - name: Type check with ty
         run: uv run ty check .
 
   tests:
     name: Tests
-    needs: quality
     runs-on: ubuntu-latest
 
     steps:

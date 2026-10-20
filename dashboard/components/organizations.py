@@ -76,7 +76,7 @@ def render_org_summary(org_summary: DataFrame) -> None:
     st_echarts(options, height="360px")
 
     with st.expander(label=":material/table: View full table (top 100 organizations)"):
-        df_display: DataFrame = top100.to_pandas().rename(
+        df_display = top100.to_pandas().rename(
             columns={
                 "org_name": "Organization",
                 "total_events": "Total events",

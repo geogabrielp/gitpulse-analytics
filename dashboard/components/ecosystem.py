@@ -444,21 +444,21 @@ def render_ecosystem_kpis(kpis: dict[str, float | int | None]) -> None:
     with col2:
         st.metric(
             label=":material/star: Total stars",
-            value=f"{int(kpis.get('total_stars', 0)):,}",
+            value=f"{int(kpis.get('total_stars') or 0):,}",
             help="Total WatchEvent (star) activity in the period.",
             border=True,
         )
     with col3:
         st.metric(
             label=":material/speed: Star velocity / day",
-            value=f"{int(kpis.get('avg_stars_per_day', 0)):,}",
+            value=f"{int(kpis.get('avg_stars_per_day') or 0):,}",
             help="Average stars gained per day in the period.",
             border=True,
         )
     with col4:
         st.metric(
             label=":material/dynamic_feed: Daily active repos / day",
-            value=f"{int(kpis.get('avg_active_repos_per_day', 0)):,}",
+            value=f"{int(kpis.get('avg_active_repos_per_day') or 0):,}",
             help="Average unique repositories with activity per day (ecosystem pulse).",
             border=True,
         )

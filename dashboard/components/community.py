@@ -6,7 +6,6 @@ Uses streamlit_echarts for bar, line, and dual line charts.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any, Literal
 
 import pandas as pd
@@ -118,12 +117,12 @@ def render_contributors_over_time(contributors_ts: DataFrame) -> None:
         st.info(body="No contributor timeline data for this period.")
         return
 
-    pdf: DataFrame = contributors_ts.to_pandas()
+    pdf = contributors_ts.to_pandas()
     pivoted = pdf.pivot_table(
         index="day", columns="is_bot", values="contributors", aggfunc="sum", fill_value=0
     ).sort_index()
 
-    days = pivoted.index.strftime("%Y-%m-%d").to_list()
+    days = [d.strftime("%Y-%m-%d") for d in pivoted.index]
     human_vals: list[int] = [
         int(v) for v in pivoted.get(False, pd.Series(data=[0] * len(pivoted))).tolist()
     ]
@@ -179,7 +178,7 @@ def render_events_bot_vs_human_over_time(bot_data: DataFrame) -> None:
         index="day", columns="is_bot", values="events", aggfunc="sum", fill_value=0
     ).sort_index()
 
-    days = pivoted.index.strftime("%Y-%m-%d").to_list()
+    days = [d.strftime("%Y-%m-%d") for d in pivoted.index]
     human_events: list[int] = [
         int(v) for v in pivoted.get(key=False, default=pd.Series(data=[0] * len(pivoted))).tolist()
     ]
@@ -228,10 +227,10 @@ def render_bot_vs_human(bot_data: DataFrame) -> None:
         st.caption(body="No bot vs human data for this period.")
         return
 
-    total_bot: int | float | Decimal = bot_data.filter(bot_data["is_bot"] == True)["events"].sum()  # noqa: E712
-    total_human: int | float | Decimal = bot_data.filter(bot_data["is_bot"] == False)[  # noqa: E712
-        "events"
-    ].sum()
+    total_bot: int = int(bot_data.filter(bot_data["is_bot"] == True)["events"].sum() or 0)  # noqa: E712
+    total_human: int = int(
+        bot_data.filter(bot_data["is_bot"] == False)["events"].sum() or 0  # noqa: E712
+    )
 
     if total_bot + total_human == 0:
         st.caption(body="No event data for bot vs human comparison.")

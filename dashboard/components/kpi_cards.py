@@ -11,20 +11,20 @@ import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
 
-def render(kpis: dict[str, object]) -> None:
+def render(kpis: dict[str, int | float | None]) -> None:
     """Render the at-a-glance KPI cards."""
     row1: list[DeltaGenerator] = st.columns(spec=4)
     with row1[0]:
         st.metric(
             label=":material/inventory: Total events",
-            value=f"{int(kpis.get('total_events', 0)):,}",
+            value=f"{int(kpis.get('total_events') or 0):,}",
             help="Total events in the selected date range.",
             border=True,
         )
     with row1[1]:
         st.metric(
             label=":material/folder: Active repos",
-            value=f"{int(kpis.get('active_repos', 0)):,}",
+            value=f"{int(kpis.get('active_repos') or 0):,}",
             help="Number of unique repositories with activity.",
             border=True,
         )

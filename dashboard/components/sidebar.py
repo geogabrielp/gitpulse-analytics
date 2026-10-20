@@ -56,7 +56,7 @@ def render() -> None:
         icon=":material/filter_list:",
     ):
         if isinstance(selected, (list, tuple)) and len(selected) == _DATE_RANGE_LEN:
-            st.session_state.filter_date_range: tuple[date, date] = (selected[0], selected[1])
+            st.session_state.filter_date_range = (selected[0], selected[1])
             st.rerun()
         else:
             st.sidebar.warning(

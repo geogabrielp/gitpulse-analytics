@@ -92,6 +92,10 @@ line-ending = "auto"
 include = [
     "src",
     "tests",
+    "dashboard",
+    "pipelines",
+    "scripts",
+    "main.py",
 ]
 exclude = [
     ".venv",

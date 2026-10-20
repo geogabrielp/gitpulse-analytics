@@ -9,7 +9,7 @@ Hub cache on first use, then scans it from disk (public dashboard)
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 import polars as pl
 import streamlit as st
@@ -48,7 +48,7 @@ _HF_PATHS: dict[str, str] = {
 
 
 # Internal helpers
-def _show_infra_error() -> None:
+def _show_infra_error() -> NoReturn:
     """Display a friendly error when the selected data source is unreachable."""
     if settings.dashboard.data_source == "minio":
         body = (
@@ -827,7 +827,7 @@ def get_star_engagement_conversion(
 
 # Shared helpers
 @st.cache_data(ttl=settings.dashboard.cache_ttl, show_spinner=False)
-def get_date_range() -> tuple[date, date] | None:
+def get_date_range() -> tuple[date, date]:
     """Return the min and max day available in gold_daily."""
     try:
         row: tuple[Any, ...] = (
