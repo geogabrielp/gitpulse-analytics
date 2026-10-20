@@ -3,7 +3,7 @@
 	install \
 	format lint typecheck rmcache \
 	test test-cov \
-	pipeline export-data dashboard
+	pipeline export-data dashboard serve
 
 help:
 	@echo
@@ -34,6 +34,7 @@ help:
 	@echo "   make pipeline:    Run the full ETL pipeline (bronze + silver + gold)"
 	@echo "   make export-data: Export MinIO data to static Parquet for dashboard"
 	@echo "   make dashboard:   Launch the Streamlit dashboard"
+	@echo "   make serve:       Serve the hourly pipeline (long-running process)"
 	@echo
 
 up:
@@ -78,6 +79,9 @@ export-data:
 
 dashboard:
 	uv run streamlit run dashboard/app.py
+
+serve:
+	uv run python main.py serve
 
 test:
 	uv run pytest tests/ -x --verbose
