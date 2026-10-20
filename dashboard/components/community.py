@@ -6,7 +6,7 @@ Uses streamlit_echarts for bar, line, and dual line charts.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 import pandas as pd
 import pandas.core.frame
@@ -263,6 +263,30 @@ def render_bot_vs_human(bot_data: DataFrame) -> None:
     st_echarts(options, height="320px")
 
 
+def _heatmap_pieces(values: list[int], palette: list[str]) -> list[dict[str, Any]]:
+    """Build GitHub-style discrete buckets from quartiles of the nonzero values."""
+    ordered: list[int] = sorted(values)
+    if not ordered:
+        return [{"value": 0, "color": palette[0], "label": "No events"}]
+
+    n: int = len(ordered)
+    thresholds: list[int] = sorted({ordered[(n * q) // 4] for q in (1, 2, 3)})
+
+    bins: int = len(thresholds) + 1
+    step: float = (len(palette) - 2) / (bins - 1) if bins > 1 else 0.0
+    colors: list[str] = [palette[1 + round(i * step)] for i in range(bins)]
+
+    pieces: list[dict[str, Any]] = []
+    lower: int = 1
+    for upper, color in zip(thresholds, colors[:-1], strict=True):
+        pieces.append({"min": lower, "max": upper, "color": color, "label": f"{lower:,}–{upper:,}"})
+        lower = upper + 1
+    pieces.append({"min": lower, "color": colors[-1], "label": f"{lower:,}+"})
+    # zeros are explicit empty cells, not the lowest activity bucket
+    pieces.insert(0, {"value": 0, "color": palette[0], "label": "No events"})
+    return pieces
+
+
 def render_daily_heatmap(heatmap: DataFrame, color_scheme: str = "blue") -> None:
     """Heatmap: event count by day-of-week x hour, GitHub-style."""
     if heatmap.is_empty():
@@ -282,20 +306,15 @@ def render_daily_heatmap(heatmap: DataFrame, color_scheme: str = "blue") -> None
         lookup[(row["dow"], row["hour"])] = row["events"]
 
     data: list[list[int | Any]] = []
-    max_val = 0
-    nonzero: list[Any] = []
+    nonzero: list[int] = []
     for d in range(7):
         for h in range(24):
             val: Any = lookup.get((d, h), 0)
             data.append([h, d, val])
-            max_val: Literal[0] | Any = max(max_val, val)
             if val > 0:
                 nonzero.append(val)
 
-    nonzero_sorted: list[Any] = sorted(nonzero)
-    n: int = len(nonzero_sorted)
-    median: Any | Literal[0] = nonzero_sorted[n // 2] if n else 0
-    floor: Any | int | float = median * 0.85
+    pieces: list[dict[str, Any]] = _heatmap_pieces(nonzero, palette)
 
     options = {
         "tooltip": {"position": "top"},
@@ -308,16 +327,19 @@ def render_daily_heatmap(heatmap: DataFrame, color_scheme: str = "blue") -> None
         "yAxis": {
             "type": "category",
             "data": dow_labels,
+            # ECharts renders category index 0 at the bottom by default,
+            # which would show the week upside down (Sat → Sun).
+            "inverse": True,
             "splitArea": {"show": True},
         },
         "visualMap": {
-            "min": floor,
-            "max": max_val or 1,
-            "calculable": True,
+            "type": "piecewise",
+            "pieces": pieces,
             "orient": "horizontal",
             "left": "center",
             "bottom": "10%",
-            "inRange": {"color": palette},
+            "itemWidth": 14,
+            "itemHeight": 10,
             "textStyle": {"color": "#e0e0e0", "fontSize": 12},
         },
         "series": [

@@ -73,7 +73,7 @@ progress_holder.empty()
 st.subheader(body=":material/local_fire_department: Daily activity heatmap")
 st.markdown(
     body="Event concentration by day-of-week and hour (reveals peak activity windows).",
-    help="Only showing the last 7 days of the week.",
+    help="Always shows the last 7 days ending on the selected end date.",
 )
 
 tab_push, tab_pr = st.tabs(

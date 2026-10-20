@@ -318,14 +318,10 @@ def get_daily_heatmap(
     end: date,
     event_type: str | None = None,
 ) -> DataFrame:
-    """Return event count by day-of-week x hour (last 7 days only)."""
-    heatmap_start: date = end - timedelta(days=7)
+    """Return event count by day-of-week x hour (last 7 days, ending on ``end``)."""
+    heatmap_start: date = end - timedelta(days=6)
     events: LazyFrame = _silver_events_lf().filter(
-        pl.col(name="created_at").is_between(
-            lower_bound=datetime.combine(date=heatmap_start, time=datetime.min.time()),
-            upper_bound=datetime.combine(date=end, time=datetime.min.time()),
-            closed="both",
-        )
+        pl.col(name="created_at").dt.date().is_between(heatmap_start, end)
     )
     if event_type:
         events = events.filter(pl.col(name="type") == event_type)
